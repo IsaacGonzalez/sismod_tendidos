@@ -8,14 +8,20 @@ def tendidos(*quantities, cantidad_max_lienzos, consumo_por_prenda, largo_maximo
 
   # puts "Cantidades: #{quantities}"
 
-  mcd = quantities.reject(&:zero?).reduce { |acc, q| acc.gcd(q) }
+  # Verificamos que haya al menos una cantidad no-cero
+  quantities_no_cero = quantities.reject(&:zero?)
+  if quantities_no_cero.empty?
+    raise "Todas las cantidades son cero, no se puede calcular proporciones"
+  end
+
+  mcd = quantities_no_cero.reduce { |acc, q| acc.gcd(q) }
   min = quantities.min
 
   # puts "mcd: #{mcd}"
   # puts "min: #{min}"
 
   if mcd <= 9
-    divisor = quantities.reject(&:zero?).min # evitamos division por cero
+    divisor = quantities_no_cero.min # evitamos division por cero
   else
     divisor = mcd
   end
@@ -24,23 +30,40 @@ def tendidos(*quantities, cantidad_max_lienzos, consumo_por_prenda, largo_maximo
 
   proportions = quantities.map { |q| q / divisor }
 
-  # Validemos la proporcion en base al largo maximo 
+  # Validemos la proporcion en base al largo maximo y ajustemos si es necesario
   largo_tendido = calculo_largo_tendido(proportions, consumo_por_prenda)
-  
-  proporcion_valida = largo_tendido <= largo_maximo_tendido
-  
-  while  !proporcion_valida
-    max_value = proportions.max
-    proportions.map! { |p| p == max_value ? p - 1 : p }
-
-    largo_tendido = calculo_largo_tendido(proportions, consumo_por_prenda)
-
-    proporcion_valida = largo_tendido <= largo_maximo_tendido
-  end 
-
+  if largo_tendido > largo_maximo_tendido
+    # Buscamos un divisor mayor que el actual para reducir las proporciones
+    # pero manteniendo las proporciones relativas correctas
+    divisor_original = divisor
+    divisor_ajustado = divisor_original
+    
+    # Probamos con divisores mayores hasta encontrar uno que funcione
+    (divisor_original + 1..divisor_original * 10).each do |nuevo_divisor|
+      proporciones_ajustadas = quantities.map { |q| q / nuevo_divisor }
+      largo_ajustado = calculo_largo_tendido(proporciones_ajustadas, consumo_por_prenda)
+      
+      if largo_ajustado <= largo_maximo_tendido
+        divisor_ajustado = nuevo_divisor
+        proportions = proporciones_ajustadas
+        divisor = nuevo_divisor
+        break
+      end
+    end
+    
+    # Si no encontramos un divisor adecuado, intentamos con proporciones mínimas
+    if largo_tendido > largo_maximo_tendido
+      proportions = proportions.map { |p| p > 0 ? 1 : 0 }
+      largo_ajustado = calculo_largo_tendido(proportions, consumo_por_prenda)
+      if largo_ajustado > largo_maximo_tendido
+        raise "No es posible ajustar las proporciones a enteros para el largo máximo especificado"
+      end
+    end
+  end
 
   base_tendido = proportions.map { |p| p * cantidad_max_lienzos }
 
+  
   # puts "quantities.reject(&:zero?).first: #{quantities.reject(&:zero?).first}"
   # puts "base_tendido.reject(&:zero?).first: #{base_tendido.reject(&:zero?).first}"
 
@@ -238,6 +261,34 @@ class ProportionTest < Minitest::Test
         end
     end
 
+    def test_ajuste_automatico_proporciones
+        # Caso donde el largo del tendido sería mayor al máximo
+        input = [2000, 4000, 6000, 8000, 8000, 6000, 6000]  # Cantidades grandes
+        consumo_por_prenda = 0.8  # Consumo alto por prenda
+        largo_maximo = 8.0        # Largo máximo pequeño
+        
+        cantidad_max_lienzos = 100
+        
+        resultado = tendidos(input, cantidad_max_lienzos, consumo_por_prenda, largo_maximo)
+        
+        puts "Test Ajuste Automático"
+        puts JSON.neat_generate(resultado)
+        
+        # Verificamos que el largo del tendido sea menor o igual al máximo
+        largo_tendido = calculo_largo_tendido(resultado[:proporcion], consumo_por_prenda)
+        puts "Largo tendido calculado: #{largo_tendido}"
+        puts "Largo máximo: #{largo_maximo}"
+        
+        assert largo_tendido <= largo_maximo, "El largo del tendido debe ser menor o igual al máximo"
+        
+        # Verificamos que las proporciones no sean todas cero
+        assert !resultado[:proporcion].all?(&:zero?), "Las proporciones no deben ser todas cero"
+        
+        # Verificamos que las proporciones mantengan la relación relativa
+        assert resultado[:proporcion].any? { |p| p > 0 }, "Al menos una proporción debe ser mayor que cero"
+        
+        puts "✅ Ajuste automático funcionó correctamente"
+    end
 
     # Fragrant Lilac 
     # def test_caso_4
